@@ -1,4 +1,4 @@
-FROM debian:bookworm-slim AS bench
+FROM debian:trixie-slim AS bench
 
 LABEL author=frappé
 
@@ -7,9 +7,11 @@ ARG GIT_BRANCH=v5.x
 
 RUN apt-get update \
     && DEBIAN_FRONTEND=noninteractive apt-get install --no-install-recommends -y \
+    ca-certificates \
     # For frappe framework
     git \
     mariadb-client \
+    # Postgresql client v17 on Debian 13
     postgresql-client \
     gettext-base \
     wget \
@@ -23,6 +25,8 @@ RUN apt-get update \
     libharfbuzz0b \
     libpangoft2-1.0-0 \
     libpangocairo-1.0-0 \
+    # Chrome PDF dependencies
+    chromium-shell \
     # to work inside the container
     locales \
     build-essential \
@@ -35,7 +39,6 @@ RUN apt-get update \
     tree \
     nano \
     less \
-    software-properties-common \
     bash-completion \
     # For psycopg2
     libpq-dev \
@@ -78,16 +81,6 @@ RUN apt-get update \
 RUN sed -i -e 's/# en_US.UTF-8 UTF-8/en_US.UTF-8 UTF-8/' /etc/locale.gen \
     && dpkg-reconfigure --frontend=noninteractive locales
 
-# Detect arch and install wkhtmltopdf
-ARG WKHTMLTOPDF_VERSION=0.12.6.1-3
-ARG WKHTMLTOPDF_DISTRO=bookworm
-RUN if [ "$(uname -m)" = "aarch64" ]; then export ARCH=arm64; fi \
-    && if [ "$(uname -m)" = "x86_64" ]; then export ARCH=amd64; fi \
-    && downloaded_file=wkhtmltox_${WKHTMLTOPDF_VERSION}.${WKHTMLTOPDF_DISTRO}_${ARCH}.deb \
-    && wget -q https://github.com/wkhtmltopdf/packaging/releases/download/$WKHTMLTOPDF_VERSION/$downloaded_file \
-    && dpkg -i $downloaded_file \
-    && rm $downloaded_file
-
 # Create new user with home directory, improve docker compatibility with UID/GID 1000,
 # add user to sudo group, allow passwordless sudo, switch to that user
 # and change directory to user home directory
@@ -99,18 +92,15 @@ USER frappe
 WORKDIR /home/frappe
 
 # Install Python via pyenv
-ENV PYTHON_VERSION_V14=3.10.13
 ENV PYTHON_VERSION=3.14.2
 ENV PYENV_ROOT=/home/frappe/.pyenv
 ENV PATH=$PYENV_ROOT/shims:$PYENV_ROOT/bin:$PATH
 
 # From https://github.com/pyenv/pyenv#basic-github-checkout
 RUN git clone --depth 1 https://github.com/pyenv/pyenv.git .pyenv \
-    && pyenv install $PYTHON_VERSION_V14 \
     && pyenv install $PYTHON_VERSION \
-    && PYENV_VERSION=$PYTHON_VERSION_V14 pip install --no-cache-dir virtualenv \
     && PYENV_VERSION=$PYTHON_VERSION pip install --no-cache-dir virtualenv \
-    && pyenv global $PYTHON_VERSION $PYTHON_VERSION_v14 \
+    && pyenv global $PYTHON_VERSION \
     && sed -Ei -e '/^([^#]|$)/ {a export PYENV_ROOT="/home/frappe/.pyenv" a export PATH="$PYENV_ROOT/bin:$PATH" a ' -e ':a' -e '$!{n;ba};}' ~/.profile \
     && echo 'eval "$(pyenv init --path)"' >>~/.profile \
     && echo 'eval "$(pyenv init -)"' >>~/.bashrc
@@ -126,16 +116,12 @@ RUN git clone ${GIT_REPO} --depth 1 -b ${GIT_BRANCH} .bench \
     && echo "export BENCH_DEVELOPER=1" >>/home/frappe/.bashrc
 
 # Install Node via nvm
-ENV NODE_VERSION_14=16.20.2
 ENV NODE_VERSION=24.12.0
 ENV NVM_DIR=/home/frappe/.nvm
 ENV PATH=${NVM_DIR}/versions/node/v${NODE_VERSION}/bin/:${PATH}
 
-RUN wget -qO- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.5/install.sh | bash \
+RUN wget -qO- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash \
     && . ${NVM_DIR}/nvm.sh \
-    && nvm install ${NODE_VERSION_14} \
-    && nvm use v${NODE_VERSION_14} \
-    && npm install -g yarn \
     && nvm install ${NODE_VERSION} \
     && nvm use v${NODE_VERSION} \
     && npm install -g yarn \
